@@ -14,11 +14,19 @@ guardrail decision:
 | Option-order sensitivity | Does the answer change when the same options are shown in a different order? |
 | Selective prediction | If low-confidence items are escalated, what error rate remains, and how much traffic was actually saved? |
 
+Calibration is reported twice, raw and after temperature fitting, because the
+post-fit figure is the one vendors publish. The temperature is fitted on items
+disjoint from the ones it is reported on, and the harness also reports what the
+in-sample shortcut would have bought, so the difference is visible instead of
+assumed.
+
 ## Status
 
-Early. The metric layer is implemented and unit-tested; no real model has been
-audited yet. See `RESEARCH_NOTES.md` for the hypothesis, the sources, and what
-is deliberately not claimed.
+Early. The metric layer is implemented and unit-tested, and temperature
+fitting is now held to a disjoint fit/report split by the library rather than by
+the caller's discipline. No real model has been audited yet. See
+`RESEARCH_NOTES.md` for the hypothesis, the sources, and what is deliberately
+not claimed.
 
 ## Why these three
 
@@ -68,14 +76,28 @@ Calibration and selective prediction take plain probability vectors, so they
 work against any model, including an LLM asked for structured output:
 
 ```python
-from system1_audit import calibration_report, fit_temperature, risk_coverage_curve
+from system1_audit import calibration_report, risk_coverage_curve
 
 report = calibration_report(probabilities, correct_index)
 print(report.ece, report.adaptive_ece, report.brier, report.overconfidence)
 
-temperature = fit_temperature(fit_probs, fit_truth)   # fit on a held-out split
 selective = risk_coverage_curve(confidences, correct)
 print(selective.coverage_at_risk(target_risk=0.02))
+```
+
+To report a post-temperature number, let the harness hold the split. The
+assignment hashes each item's own identifier, so it is identical across
+processes and does not move when the dataset grows:
+
+```python
+from system1_audit import deterministic_split, held_out_calibration
+
+split = deterministic_split(item_ids, fit_fraction=0.5)
+audit = held_out_calibration(probabilities, correct_index, split)
+
+print(audit.raw.ece)          # no scaling
+print(audit.calibrated.ece)   # temperature fitted on the disjoint fit side
+print(audit.nll_optimism)     # what fitting in-sample would have appeared to save
 ```
 
 ## What the metrics mean
@@ -93,6 +115,15 @@ print(selective.coverage_at_risk(target_risk=0.02))
   An order-invariant model puts `1/K` on each.
 - **AURC** — area under the risk-coverage curve; lower means confidence ranks
   errors better.
+- **NLL optimism** — NLL advantage the in-sample temperature holds over the
+  held-out one on the same items. Non-negative by construction: the in-sample
+  temperature minimises NLL over exactly those items, so nothing can beat it
+  there. This is the number that shows an in-sample post-fit figure is
+  unfalsifiable rather than merely noisy.
+- **ECE optimism** — the same comparison on ECE. Measured and reported, but
+  **not** guaranteed non-negative, because the fit targets NLL and ECE is a
+  binned statistic the fit does not optimise. The demo currently prints a
+  negative value for it.
 
 ## Known limitations
 
@@ -102,8 +133,20 @@ print(selective.coverage_at_risk(target_risk=0.02))
   expose probabilities rather than logits. This is exact up to the softmax's
   shift invariance, but it cannot recover information already lost to rounding
   or truncation in the API response.
-- Temperature fitted and reported on the same split will understate ECE. The
-  library does not enforce a split; the caller must.
+- `held_out_calibration` enforces a disjoint fit/report split, but only for the
+  temperature. Nothing stops a caller choosing a split after seeing the
+  results, or reporting the best of several salts; the salt used is an argument
+  and should be recorded with any number reported.
+- Splitting requires a unique, non-empty identifier per item, so
+  `ChoiceQuestion`'s default blank `item_id` is rejected rather than collapsed
+  into one bucket.
+- Hash-based assignment only approximates the requested `fit_fraction`; the
+  realised share is on `Split.fit_fraction` and should be read, not assumed.
+- An earlier version of this file claimed that fitting and reporting on the same
+  items "will understate ECE". That is not reliably true and has been corrected:
+  measured over the synthetic deciders in the test suite, the NLL advantage is
+  always present but the ECE gap changes sign depending on the decider, because
+  the temperature is fitted against NLL rather than ECE.
 - Permutation sampling is exhaustive only for small option counts; above that
   it is a seeded random sample, so flip rate is an estimate with sampling error
   that the harness does not currently report a confidence interval for.

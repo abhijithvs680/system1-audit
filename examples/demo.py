@@ -11,11 +11,11 @@ surface exactly that, and that headline accuracy alone does not.
 from __future__ import annotations
 
 from system1_audit import (
-    apply_temperature,
     audit_dataset,
     calibration_report,
-    fit_temperature,
+    held_out_calibration,
     risk_coverage_curve,
+    split_questions,
 )
 from system1_audit.deciders import SyntheticDecider
 from system1_audit.types import ChoiceQuestion
@@ -38,6 +38,24 @@ QUESTIONS = tuple(
     for i, (state, correct) in enumerate(STATES)
 )
 ANSWER_KEY = {q.state: q.correct for q in QUESTIONS}
+
+
+def expanded_questions(variants_per_state: int = 30) -> tuple[ChoiceQuestion, ...]:
+    """The curated states, varied into a set large enough to split.
+
+    Held-out temperature fitting needs more items than a readable example can
+    list by hand: eight items split in half leaves a temperature fitted on four
+    points, which is noise. Each variant carries distinct state text, so the
+    decider produces a distinct decision for it rather than a copy of another
+    item's. Repeating identical states under new identifiers would put the same
+    decision on both sides of the split, which is the leakage this module
+    exists to prevent.
+    """
+    return tuple(
+        ChoiceQuestion(f"{state} (case {variant})", LABELS, correct, f"v{index}-{variant}")
+        for index, (state, correct) in enumerate(STATES)
+        for variant in range(variants_per_state)
+    )
 
 
 def main() -> None:
@@ -65,16 +83,39 @@ def main() -> None:
     print(f"  Brier              {report.brier:.3f}")
     print(f"  NLL                {report.nll:.3f}")
 
-    temperature = fit_temperature(probabilities, truth)
-    rescaled = [apply_temperature(p, temperature) for p in probabilities]
-    fitted = calibration_report(rescaled, truth, n_bins=5)
+    wide = expanded_questions()
+    wide_decider = SyntheticDecider(
+        answer_key={q.state: q.correct for q in wide},
+        skill=0.05,
+        position_weight=0.35,
+        sharpness=4.0,
+        noise=0.6,
+        seed=17,
+    )
+    wide_probabilities = [
+        wide_decider.decide_choice(q.state, q.labels).probabilities for q in wide
+    ]
+    wide_truth = [q.labels.index(q.correct) for q in wide]
+    split = split_questions(wide, fit_fraction=0.5)
+    held_out = held_out_calibration(wide_probabilities, wide_truth, split, n_bins=10)
     print()
-    print("CALIBRATION AFTER TEMPERATURE FITTING")
-    print(f"  fitted temperature {temperature:.3f}")
-    print(f"  ECE                {fitted.ece:.3f}")
-    print(f"  NLL                {fitted.nll:.3f}")
-    print("  note: fitted on the same items it is reported on, which flatters")
-    print("        the number. A real audit fits and reports on disjoint splits.")
+    print("CALIBRATION, TEMPERATURE FITTED ON A DISJOINT SPLIT")
+    print("  measured on a larger generated set: eight items cannot be split")
+    print(f"  fit / report items {held_out.n_fit} / {held_out.n_report}")
+    print(f"  accuracy           {held_out.raw.accuracy:.3f}")
+    print(f"  overconfidence     {held_out.raw.overconfidence:+.3f}")
+    print(f"  held-out T         {held_out.temperature:.3f}")
+    print(f"  ECE, raw           {held_out.raw.ece:.3f}")
+    print(f"  ECE, held-out T    {held_out.calibrated.ece:.3f}")
+    print(f"  NLL, held-out T    {held_out.calibrated.nll:.3f}")
+    print()
+    print("  what fitting on the reported items instead would have bought:")
+    print(f"  in-sample T        {held_out.in_sample_temperature:.3f}")
+    print(f"  ECE, in-sample T   {held_out.in_sample.ece:.3f}")
+    print(f"  NLL optimism       {held_out.nll_optimism:+.4f} (never negative)")
+    print(f"  ECE optimism       {held_out.ece_optimism:+.4f} (sign not guaranteed)")
+    print("  note: a post-fit calibration figure that does not say which items the")
+    print("        temperature was fitted on may be an in-sample number.")
 
     audit = audit_dataset(decider, QUESTIONS, n_permutations=8, seed=17)
     print()

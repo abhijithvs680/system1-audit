@@ -124,8 +124,10 @@ All three are falsifiable and none requires access to Jev.
 ### Evaluation rules
 
 - Temperature is fitted on a split disjoint from the one it is reported on.
-  Fitting and reporting on the same items is the single easiest way to publish
-  a flattering ECE, and the demo script says so in its own output.
+  Enforced by `splits.held_out_calibration` since milestone 3, not left to the
+  caller. The in-sample number is reported alongside the held-out one, so the
+  difference is visible rather than asserted. The argument rests on the NLL
+  guarantee, not on an ECE effect -- see the milestone 3 findings below.
 - Every permutation audit is seeded and reproducible across processes.
 - Vendor self-reported numbers are never mixed into a results table with
   numbers measured here.
@@ -167,7 +169,7 @@ environment (report the harness alone and drop the empirical claims).
 |---|---|---|
 | 1 | Dependency-free metric layer; self-validating tests against planted defects | Done |
 | 2 | Adapter for an open checkpoint; needs a GPU or patient CPU environment | Not started |
-| 3 | Public dataset harness with disjoint fit/report splits | Not started |
+| 3 | Disjoint fit/report split discipline, enforced by the library | Done |
 | 4 | LLM structured-output baseline on the same items | Not started |
 | 5 | Write-up: coverage at a fixed error budget, with honest limitations | Not started |
 
@@ -175,6 +177,59 @@ No adapter to Laya is included in this commit on purpose. The package's Python
 call signature could not be verified from this environment, and guessing at an
 API would put unverified code in the repository under the appearance of a
 tested integration.
+
+---
+
+## Findings from milestone 3 (2026-09-29)
+
+Milestone 3 moved the disjoint-split rule out of the evaluation-rules list and
+into the library, as `splits.py`. Two results came out of measuring it rather
+than asserting it. Both are measured against the synthetic deciders in the test
+suite, so they are properties of the *metric*, not of any real model.
+
+**1. The in-sample NLL advantage is guaranteed; the ECE advantage is not.**
+
+An in-sample temperature minimises NLL over exactly the items it is reported
+on, so no held-out temperature can beat it there. That makes an in-sample
+post-fit NLL unfalsifiable, which is the real argument for the split. ECE does
+not inherit this: the fit targets NLL, and ECE is a binned statistic the fit
+does not optimise, so the in-sample ECE can come out *worse* than the held-out
+one. Over the deciders in the suite the ECE gap changes sign. `examples/demo.py`
+currently prints NLL optimism `+0.0011` and ECE optimism `-0.0152` on the same
+audit.
+
+This corrects a claim previously made in `README.md`, that fitting and reporting
+on the same items "will understate ECE". It is not reliably true and the
+wording has been fixed. The argument for disjoint splits stands on the NLL
+guarantee, not on an ECE effect.
+
+**2. Temperature scaling recovers a planted sharpening exactly, up to a
+constant.**
+
+The synthetic decider raises its weights to `sharpness`, and `apply_temperature`
+divides `log p` by `T`. Both therefore enter the softmax only through
+`sharpness / T`, so the fitted temperature is proportional to the planted
+defect. Measured: `sharpness` of 1, 2, 4 and 8 recovers temperatures of 0.7822,
+1.5643, 3.1286 and 6.2571, a constant ratio of 0.7822. The suite asserts the
+proportionality, which makes it a check on the fitter rather than a coincidence
+of one fixture.
+
+This is a property of the harness and the synthetic decider, not evidence about
+any model. It is worth having because it means a temperature far from 1.0 on a
+real checkpoint can be read as a magnitude, not just a direction.
+
+**Method note.** The split hashes each item's own identifier with SHA-256
+rather than shuffling. A shuffle re-draws every assignment when an item is
+added, silently invalidating numbers reported against an earlier version of the
+dataset; hashing keeps item `q17` on the same side however many other items
+exist. Blank or duplicate identifiers are rejected rather than collapsed, since
+collapsing them is how the same item lands on both sides.
+
+**Still outstanding.** No public dataset is wired up yet — the split machinery
+is dataset-agnostic and takes identifiers, but milestone 2 (an adapter for an
+open checkpoint) remains blocked on a model environment, and arXiv:2609.30454
+remains unread because arxiv.org was again refused by this environment's egress
+policy on 2026-09-29. No novelty is claimed for any of the above.
 
 ---
 
