@@ -13,7 +13,9 @@ from __future__ import annotations
 from system1_audit import (
     audit_dataset,
     calibration_report,
+    ece_noise_floor,
     held_out_calibration,
+    order_sensitivity_significance,
     risk_coverage_curve,
     split_questions,
 )
@@ -142,6 +144,46 @@ def main() -> None:
         threshold = selective.threshold_at_risk(target)
         shown = "none" if threshold is None else f"{threshold:.3f}"
         print(f"  risk <= {target:.2f}       coverage {coverage:.3f} at threshold {shown}")
+
+    print()
+    print("IS ANY OF IT DISTINGUISHABLE FROM ZERO?")
+    significance = order_sensitivity_significance(audit, n_resamples=2000, seed=17)
+    print(f"  items audited      {significance.n_items}")
+    print(f"  unstable items     {significance.unstable_item_rate}")
+    print(f"  mean flip rate     {significance.mean_flip_rate}")
+    print(f"  vote gain          {significance.vote_gain}")
+    for position, interval in enumerate(significance.position_deviation):
+        print(f"  position {position} vs 1/K   {interval}")
+    print(f"  any item flipped   {significance.any_item_flipped}")
+    print(f"  rate above 0.05    {significance.unstable_rate_exceeds(0.05)}")
+    print(f"  position bias      {significance.position_bias_distinguishable_from_uniform}")
+    print("  note: the per-position intervals are Bonferroni-corrected, so asking")
+    print("        whether any position is off uniform holds at the stated level.")
+    print("  note: a non-zero flip rate is not a finding on its own. One flipped")
+    print("        item excludes a zero rate at any n, which is why the verdict")
+    print("        above is stated against a threshold somebody would act on.")
+
+    print()
+    print("WHAT A PERFECTLY CALIBRATED MODEL WOULD HAVE SCORED")
+    floor = ece_noise_floor(
+        confidences,
+        n_bins=10,
+        observed_ece=report.ece,
+        n_simulations=2000,
+        seed=17,
+    )
+    print(f"  observed ECE       {floor.observed:.4f} at n={floor.n}, {floor.n_bins} bins")
+    print(f"  noise floor, mean  {floor.mean:.4f}")
+    print(f"  noise floor, 95th  {floor.upper_quantile:.4f}")
+    print(f"  above the floor    {floor.observed_exceeds_floor}")
+    print(f"  p-value            {floor.p_value:.3f}")
+    print("  note: binned ECE is positively biased, so a perfectly calibrated")
+    print("        model scores above zero. An ECE quoted without n and bin count")
+    print("        cannot be read at all.")
+    for n_items in (40, 200, 1000):
+        stretched = [confidences[i % len(confidences)] for i in range(n_items)]
+        scaled = ece_noise_floor(stretched, n_bins=10, n_simulations=1000, seed=17)
+        print(f"  floor at n={n_items:<5d}   mean {scaled.mean:.4f}, 95th {scaled.upper_quantile:.4f}")
 
 
 if __name__ == "__main__":

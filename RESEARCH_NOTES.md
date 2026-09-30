@@ -97,6 +97,12 @@ measurably biased toward specific display positions. Falsified if the flip
 rate is at chance-level zero and per-position mass sits within sampling noise
 of `1/K`.
 
+**Restated after milestone 6.** "At chance-level zero" is not testable for a
+flip rate: under exact order invariance the rate is exactly zero, so a single
+flipped item excludes zero at any `n`. H2 is falsified if the unstable-item
+rate cannot be put above a stated threshold and no per-position deviation
+clears a family-wise interval. See finding 1 under milestone 6.
+
 **H3 (operational value).** The usable quantity for a routing layer is not
 accuracy but coverage at a fixed error budget. H3 says that voting across
 option permutations buys more accuracy per unit latency than moving to a
@@ -129,6 +135,9 @@ All three are falsifiable and none requires access to Jev.
   difference is visible rather than asserted. The argument rests on the NLL
   guarantee, not on an ECE effect -- see the milestone 3 findings below.
 - Every permutation audit is seeded and reproducible across processes.
+- No audited quantity is reported without an interval, and no ECE is reported
+  without the noise floor for its own `n` and bin count. Enforced by
+  `significance.py` since milestone 6.
 - Vendor self-reported numbers are never mixed into a results table with
   numbers measured here.
 - Hardware, batch size, and checkpoint are recorded with every latency figure,
@@ -172,6 +181,7 @@ environment (report the harness alone and drop the empirical claims).
 | 3 | Disjoint fit/report split discipline, enforced by the library | Done |
 | 4 | LLM structured-output baseline on the same items | Not started |
 | 5 | Write-up: coverage at a fixed error budget, with honest limitations | Not started |
+| 6 | Significance layer: an interval on every audited quantity, and an ECE noise floor | Done |
 
 No adapter to Laya is included in this commit on purpose. The package's Python
 call signature could not be verified from this environment, and guessing at an
@@ -233,11 +243,157 @@ policy on 2026-09-29. No novelty is claimed for any of the above.
 
 ---
 
+## Findings from milestone 6 (2026-09-30)
+
+Milestone 6 exists because neither H2 nor the stop condition was computable.
+H2 is falsified "if the flip rate is at chance-level zero and per-position mass
+sits within sampling noise of `1/K`", and the harness reported `mean_flip_rate`
+and `max_position_deviation` as bare point estimates. `significance.py` attaches
+an interval to each audited quantity. Four results came out of building it, and
+two of them are corrections to this project's own method.
+
+**1. The stop condition as written is not testable, and this is a correction.**
+
+"The flip rate is indistinguishable from zero" cannot be asked of a flip rate.
+Under exact order invariance the rate is *exactly* zero, so observing a single
+flipped item excludes zero outright. Measured, for one unstable item:
+
+| Unstable items | Exact 95% interval | Excludes zero? |
+|---|---|---|
+| 1 of 40 | `[0.0006, 0.1316]` | yes |
+| 1 of 200 | `[0.0001, 0.0275]` | yes |
+| 1 of 1000 | `[0.0000, 0.0056]` | yes |
+
+The verdict is identical in all three rows, so a "non-zero" finding carries no
+information about `n` and none about effect size. What does change is the
+interval's width. The verdict is therefore
+`unstable_rate_exceeds(threshold)`: the caller names the rate at which option
+instability would change a decision, and the harness says whether the sample
+can put the rate above it. The stop condition should be restated in those terms
+before milestone 2 is run, rather than left as a test that always passes.
+
+**2. A bootstrap interval for a maximum is not a confidence interval.**
+
+An earlier draft of this milestone exposed an interval for
+`max_position_deviation`. On an **order-invariant** decider it measured:
+
+```
+max |position deviation|   0.0000 [0.0016, 0.0250]
+```
+
+The point estimate is outside its own bounds. The maximum of `K` absolute
+deviations is positively biased under resampling, so the percentile interval
+sits above the point value, and `excludes(0.0)` on it would have reported
+position bias on a model that has none. The field was removed rather than
+documented, since an `Interval`-typed field that is not a valid interval is a
+trap. A test asserts it stays removed, and a second test reproduces the defect
+so the reason survives. `PermutationAudit.max_position_deviation` still carries
+the point estimate.
+
+**3. A reported ECE cannot be read without `n` and the bin count.**
+
+Binned ECE is positively biased: within-bin accuracy is a finite Bernoulli
+sample and the metric takes the absolute value of the gap, so a model that is
+*exactly* as right as it says it is still scores above zero. `ece_noise_floor`
+simulates that floor by drawing correctness as `Bernoulli(confidence)` on the
+observed confidence profile. Measured on the demo's profile:
+
+| n | bins | mean floor | 95th percentile floor |
+|---|---|---|---|
+| 40 | 10 | 0.1211 | 0.1875 |
+| 200 | 10 | 0.0515 | 0.0828 |
+| 1000 | 10 | 0.0228 | 0.0360 |
+| 200 | 2 | 0.0227 | 0.0567 |
+| 200 | 20 | 0.0685 | 0.0993 |
+
+The demo makes the point sharply. On its 8 curated items the observed ECE is
+**0.2374**, and the floor for a perfectly calibrated model at n=8 with 10 bins
+has mean **0.2791**: the observed value is *below* what perfect calibration
+would score, p = 0.583. The demo's headline calibration number is entirely
+explained by binning noise.
+
+This bears directly on the published figures that motivated the project.
+Re-checked on **2026-09-30**, the Laya README still reports its calibration
+without stating the number of evaluation items or the bin count. Without those
+two numbers a raw ECE cannot be compared against anything, including its own
+post-fit counterpart, because the floor moves by a factor of five between
+n=40 and n=1000 at a fixed bin count. This is a statement about what the
+published figures permit a reader to conclude, not a claim that any figure is
+wrong.
+
+**A discrepancy in the re-check, recorded rather than resolved.** The
+2026-09-28 note in this file records the `laya` English raw mean ECE as
+**0.213**. The 2026-09-30 re-check of the same README read it as **0.466**. The
+post-fit figures (0.081 and 0.106) and the multilingual raw figure (0.314)
+matched on both dates. I cannot tell from here whether the page changed between
+the two dates, whether the earlier reading took a different row, or whether
+either retrieval summarised it incorrectly — both readings were made through a
+summarising fetch rather than by reading the raw file. Both are recorded and
+neither is presented as settled. Nothing in this project depends on which is
+right: the point above is that the missing `n` and bin count make either number
+unreadable.
+
+**4. What the harness recovers at a small sample, stated honestly.**
+
+With the bias planted on display position 0 at `position_weight=0.02` against
+`noise=0.6`, at n=60 items and 6 display orders, over 8 independent item sets:
+
+- the deviation on position 0 was positive in **8 of 8** trials (+0.0031 to
+  +0.0110), so the sign is recovered reliably;
+- the family-wise verdict fired in only **3 of 8** trials, so the effect is
+  mostly not resolvable at this sample size;
+- of those 3, one attributed the effect to position 2 rather than position 0.
+  Re-running that trial with the planted bias removed entirely fires on
+  position 2 as well, so that firing is a **false positive** and not a
+  misattribution of the real effect. One false positive in 8 trials is
+  consistent with the nominal 5% family-wise rate; 8 trials cannot resolve the
+  rate, and no claim is made about it.
+
+A strong planted bias is recovered without ambiguity: at `position_weight=0.8`
+and n=60, position 0's deviation is `0.3243 [0.3226, 0.3259]` and the other
+three sit at `-0.1081`, summing to zero as they must, since each display's
+probabilities are a normalised vector.
+
+**Method notes.** The resampling unit is the *item*. Several calls on one
+question under different display orders are repeated measurements of one unit,
+and treating them as independent observations would shrink every interval by a
+factor unrelated to the evidence. Per-position intervals are Bonferroni-
+corrected so that "is any position off uniform" holds family-wise at the
+requested level; the correction is conservative, because the deviations sum to
+zero and the comparisons are strongly dependent. Binomial intervals use
+Clopper-Pearson (exact, conservative) for the verdict and Wilson where a
+closed form is wanted; both were checked against their defining equations
+rather than against a reference implementation, keeping the package
+dependency-free.
+
+**A test-infrastructure defect fixed in passing.** The milestone 3 entry
+records "94 tests pass". From a clean checkout under the command the README
+documents, 2 of those 94 **error**: `test_splits.py` builds its subprocess
+environment from scratch so `PYTHONHASHSEED` is the only variable, which also
+drops `PYTHONPATH`, so the child can import the package only when it happens to
+be installed into site-packages. It was, in the environment where milestone 3
+ran. The helper now restores `PYTHONPATH` explicitly. This is the same class of
+environment-dependent test the account audit flagged elsewhere, and the
+milestone 3 claim was true only of that environment.
+
+**Still outstanding.** Milestone 2 was not attempted: it needs a model
+environment, and its gate is unmet — arxiv.org refused this session's requests
+again on 2026-09-30, by both a direct fetch and the proxy, so arXiv:2609.30454
+remains unread and no novelty is claimed for any of the above. Every number in
+this section comes from the synthetic deciders in the test suite and describes
+the harness, not any model.
+
+---
+
 ## Sources
 
 - Laya repository (retrieved 2026-09-28): <https://github.com/NandhaKishorM/laya>
 - Laya weights: <https://huggingface.co/convaiinnovations/laya>
 - TypeSafe AI announcement (**blocked by egress policy, not retrieved**):
   <https://typesafe.ai/blog/introducing-system-one-models-and-jev>
-- arXiv:2609.30454 (**blocked by egress policy, not retrieved**):
+- arXiv:2609.30454 (**blocked by egress policy, not retrieved**; re-checked
+  and still refused on 2026-09-29 and 2026-09-30):
   <https://arxiv.org/abs/2609.30454>
+- Laya repository, re-checked 2026-09-30 for the calibration re-check and the
+  ECE discrepancy noted under milestone 6:
+  <https://github.com/NandhaKishorM/laya>

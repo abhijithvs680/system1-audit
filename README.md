@@ -13,6 +13,7 @@ guardrail decision:
 | Calibration | Is the confidence meaningful *before* a temperature is fitted to it? |
 | Option-order sensitivity | Does the answer change when the same options are shown in a different order? |
 | Selective prediction | If low-confidence items are escalated, what error rate remains, and how much traffic was actually saved? |
+| Significance | Is any of the above distinguishable from zero on this many items? |
 
 Calibration is reported twice, raw and after temperature fitting, because the
 post-fit figure is the one vendors publish. The temperature is fitted on items
@@ -22,9 +23,10 @@ assumed.
 
 ## Status
 
-Early. The metric layer is implemented and unit-tested, and temperature
-fitting is now held to a disjoint fit/report split by the library rather than by
-the caller's discipline. No real model has been audited yet. See
+Early. The metric layer is implemented and unit-tested, temperature fitting is
+held to a disjoint fit/report split by the library rather than by the caller's
+discipline, and every audited quantity now carries an interval so a point
+estimate cannot be over-read. No real model has been audited yet. See
 `RESEARCH_NOTES.md` for the hypothesis, the sources, and what is deliberately
 not claimed.
 
@@ -124,6 +126,16 @@ print(audit.nll_optimism)     # what fitting in-sample would have appeared to sa
   **not** guaranteed non-negative, because the fit targets NLL and ECE is a
   binned statistic the fit does not optimise. The demo currently prints a
   negative value for it.
+- **ECE noise floor** — the ECE a *perfectly calibrated* model would have
+  scored on the same confidences, simulated by drawing correctness as
+  `Bernoulli(confidence)`. Binned ECE is positively biased, so this floor is
+  above zero, and it is the number a reported ECE has to beat before it means
+  anything. It falls with `n` and rises with bin count: on the demo's
+  confidence profile the 95th percentile floor is 0.19 at n=40, 0.085 at
+  n=200 and 0.037 at n=1000.
+- **Interval** — a point estimate with bounds and the method that produced
+  them. `excludes(0.0)` is the operational reading of "distinguishable from
+  zero" at that level. It is not a p-value.
 
 ## Known limitations
 
@@ -148,8 +160,44 @@ print(audit.nll_optimism)     # what fitting in-sample would have appeared to sa
   always present but the ECE gap changes sign depending on the decider, because
   the temperature is fitted against NLL rather than ECE.
 - Permutation sampling is exhaustive only for small option counts; above that
-  it is a seeded random sample, so flip rate is an estimate with sampling error
-  that the harness does not currently report a confidence interval for.
+  it is a seeded random sample. `order_sensitivity_significance` now reports an
+  interval for the flip rate, but that interval covers variation across *items*
+  only. Uncertainty from sampling the permutations themselves is not separated
+  out, so on a large option count the interval is narrower than the full
+  sampling error.
+- "Distinguishable from zero" is the wrong question for a flip rate, and asking
+  it was a mistake this project made in its own stop condition. Under exact
+  order invariance the rate is exactly zero, so a single flipped item excludes
+  zero at any `n` — the exact interval for 1 item in 40 is `[0.0006, 0.1316]`,
+  which excludes zero just as firmly as 1 in 1,000,000 would. The verdict is
+  therefore `unstable_rate_exceeds(threshold)`, and the caller has to name the
+  rate at which order instability would change a decision.
+- `mean_flip_rate`'s bootstrap interval collapses to zero width when every item
+  has the same flip rate, which reads as precision it does not have. The
+  verdict rests on the exact binomial interval for the unstable-item count, not
+  on that one.
+- No interval is offered for `max_position_deviation`. A percentile bootstrap
+  interval for a maximum does not contain its own point estimate — on an
+  order-invariant decider it measured `0.0000 [0.0016, 0.0250]`, because the
+  maximum of `K` absolute deviations is positively biased under resampling.
+  Tested against zero it reported position bias on a model with none, so the
+  field was removed rather than documented.
+- Per-position intervals are Bonferroni-corrected so that "is *any* position off
+  uniform" holds family-wise. Bonferroni is conservative here, since the
+  deviations sum to exactly zero and the comparisons are strongly dependent.
+- The family-wise verdict can fire on the wrong position. With a weak planted
+  bias (`position_weight=0.02`) against heavy noise at n=60, the sign of the
+  deviation on the biased position was recovered in all 8 trials measured, but
+  only 2 of 8 resolved it, and 1 attributed it to a different position — the
+  same trial fires identically with the bias removed, so that firing is a false
+  positive, not a misattribution of a real effect.
+- `selective_coverage_interval`'s point estimate is optimistically biased,
+  because `coverage_at_risk` maximises over a curve computed on the same data.
+  The interval says how much of the number is real; the point estimate does not.
+- The ECE noise floor tests the joint null "perfectly calibrated, given this
+  confidence profile". Clearing it says something beyond binning noise is
+  present, not in which direction — `CalibrationReport.overconfidence` is the
+  signed quantity.
 - No real model has been audited. Every number in `examples/demo.py` comes from
   a synthetic decider and describes the harness, not any product.
 

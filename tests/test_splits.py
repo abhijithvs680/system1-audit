@@ -72,7 +72,17 @@ def run_in_subprocess(program, hash_seed):
         text=True,
         check=True,
         cwd=str(REPO_ROOT),
-        env={"PYTHONHASHSEED": hash_seed, "PATH": SUBPROCESS_ENV_PATH},
+        env={
+            "PYTHONHASHSEED": hash_seed,
+            "PATH": SUBPROCESS_ENV_PATH,
+            # The child environment is built from scratch so that
+            # PYTHONHASHSEED is the only thing varying between runs. That also
+            # drops PYTHONPATH, so ``src`` has to be put back explicitly:
+            # without it the child can only import the package when it happens
+            # to be installed into site-packages, and the command the README
+            # documents does not install anything.
+            "PYTHONPATH": str(REPO_ROOT / "src"),
+        },
     )
     return result.stdout.strip()
 
