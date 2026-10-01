@@ -139,12 +139,40 @@ def _check_counts(successes: int, n: int) -> None:
         raise ValueError("successes must be in [0, n]")
 
 
+def _log_binomial_pmf(k: int, n: int, p: float) -> float:
+    """``log P(X = k)``, through ``lgamma`` so no large integer is formed."""
+    return (
+        math.lgamma(n + 1)
+        - math.lgamma(k + 1)
+        - math.lgamma(n - k + 1)
+        + k * math.log(p)
+        + (n - k) * math.log1p(-p)
+    )
+
+
 def binomial_tail_at_least(k: int, n: int, p: float) -> float:
     """Exact ``P(X >= k)`` for ``X ~ Binomial(n, p)``.
 
-    Summed with exact integer coefficients from ``math.comb``. Fine for the
-    sizes an audit of this kind produces; it is quadratic in ``n`` in the worst
-    case, not something to call inside a hot loop at ``n`` in the millions.
+    Summed term by term, anchored at the largest term in ``[k, n]`` and walked
+    outward with the pmf ratio ``p(i+1)/p(i) = ((n-i)/(i+1)) * (p/(1-p))``.
+    Anchoring matters: the terms of a binomial tail span hundreds of orders of
+    magnitude, so starting at ``i = k`` and multiplying upward can underflow to
+    zero before reaching the terms that carry the mass, and summing downward
+    from ``i = n`` has the same problem at the other end.
+
+    The anchor term itself goes through ``lgamma`` rather than ``math.comb``.
+    An earlier version of this function used exact integer coefficients, which
+    reads better and is checkable by hand, but ``math.comb(n, n // 2)`` exceeds
+    the largest representable float at ``n >= 1030`` and the multiplication
+    raised ``OverflowError`` -- on a *correct* call, for a sample size a real
+    audit could plausibly collect. One test pins ``n = 1500`` and ``n = 5000``
+    against that regression, and another asserts this implementation agrees
+    with a direct ``math.comb`` reference wherever that reference is
+    computable, so the exactness claim is carried by a test rather than by the
+    shape of the code.
+
+    Terms are dropped once they stop moving the sum, which bounds the cost on
+    the large ``n`` that a power scan reaches.
     """
     if n < 0:
         raise ValueError("n must be >= 0")
@@ -158,9 +186,32 @@ def binomial_tail_at_least(k: int, n: int, p: float) -> float:
         return 0.0
     if p == 1.0:
         return 1.0
-    total = 0.0
-    for i in range(k, n + 1):
-        total += math.comb(n, i) * (p**i) * ((1.0 - p) ** (n - i))
+
+    anchor = min(n, max(k, int((n + 1) * p)))
+    log_anchor = _log_binomial_pmf(anchor, n, p)
+    if log_anchor < -745.0:
+        # Every term in [k, n] is at or below this one, so the whole tail is
+        # below (n - k + 1) * 5e-324 and indistinguishable from zero in float.
+        return 0.0
+
+    odds = p / (1.0 - p)
+    anchor_term = math.exp(log_anchor)
+    total = anchor_term
+
+    term = anchor_term
+    for i in range(anchor, n):
+        term *= ((n - i) / (i + 1)) * odds
+        total += term
+        if term < 1e-18 * total:
+            break
+
+    term = anchor_term
+    for i in range(anchor, k, -1):
+        term *= (i / (n - i + 1)) / odds
+        total += term
+        if term < 1e-18 * total:
+            break
+
     return min(total, 1.0)
 
 

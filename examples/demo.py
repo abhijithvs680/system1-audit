@@ -13,9 +13,13 @@ from __future__ import annotations
 from system1_audit import (
     audit_dataset,
     calibration_report,
+    detectable_rate,
     ece_noise_floor,
     held_out_calibration,
     order_sensitivity_significance,
+    plan_for_rate,
+    power_curve,
+    required_items_for_rate,
     risk_coverage_curve,
     split_questions,
 )
@@ -184,6 +188,54 @@ def main() -> None:
         stretched = [confidences[i % len(confidences)] for i in range(n_items)]
         scaled = ece_noise_floor(stretched, n_bins=10, n_simulations=1000, seed=17)
         print(f"  floor at n={n_items:<5d}   mean {scaled.mean:.4f}, 95th {scaled.upper_quantile:.4f}")
+
+    print()
+    print("HOW MANY ITEMS THIS WOULD HAVE NEEDED, DECIDED BEFORE THE RUN")
+    plan = plan_for_rate(
+        name="H2-rate",
+        hypothesis="unstable-item rate exceeds 5 percent",
+        threshold=0.05,
+        assumed_rate=0.20,
+    )
+    print(f"  plan id            {plan.plan_id}")
+    print(f"  threshold          {plan.unstable_rate_threshold:.3f}")
+    print(f"  powered for rate   {plan.assumed_unstable_rate:.3f}")
+    print(f"  items registered   {plan.n_items}")
+    print(f"  unstable needed    {plan.minimum_unstable()}")
+    print(f"  power at that n    {plan.planned_power:.4f}")
+
+    size = required_items_for_rate(0.05, 0.20, 0.95, 0.8)
+    print(f"  first n at power   {size.n_items} (power {size.achieved_power:.4f})")
+    print(f"  safe from n        {size.stable_from}")
+    print("  note: exact binomial power is not monotone in n. The rejection count")
+    print("        is an integer, so one extra item can cost more power than it")
+    print("        buys, and the plan registers the sample size beyond which no")
+    print("        larger n dips below the requested power.")
+    for point in power_curve((32, 33, 34, 38, 39), 0.05, 0.20):
+        dip = "  <- below 0.8" if point.power < 0.8 else ""
+        print(
+            f"  n={point.n_items:<4d} need>={point.minimum_unstable:<3d} "
+            f"power {point.power:.4f}{dip}"
+        )
+
+    print()
+    print("WHAT A FIXED ITEM BUDGET COULD RESOLVE AT ALL")
+    for n_items in (40, 100, 300, 500):
+        rate = detectable_rate(n_items, 0.05)
+        print(f"  n={n_items:<5d} smallest resolvable rate over 0.05: {rate:.4f}")
+    print("  note: at 40 items an instability rate under 0.19 cannot be put above")
+    print("        a 5 percent threshold at all, however the audit comes out.")
+
+    outcome = plan.evaluate(significance)
+    print()
+    print("THIS AUDIT, READ AGAINST THE PLAN")
+    print(f"  {outcome}")
+    print(f"  items short        {outcome.item_shortfall}")
+    print(f"  rate verdict       {outcome.rate_verdict}")
+    print(f"  falsifies H2       {outcome.falsifies_hypothesis}")
+    print("  note: a null result on too few items is reported as inconclusive,")
+    print("        not as a falsification. The interval looks the same either")
+    print("        way and means the opposite.")
 
 
 if __name__ == "__main__":

@@ -138,6 +138,11 @@ All three are falsifiable and none requires access to Jev.
 - No audited quantity is reported without an interval, and no ECE is reported
   without the noise floor for its own `n` and bin count. Enforced by
   `significance.py` since milestone 6.
+- The threshold, the confidence, the power and the item count are fixed in a
+  `PreregisteredPlan` before a model is called, and a result quotes the
+  `plan_id` it answers. Enforced by `prereg.py` since milestone 7. A null
+  result on a sample without the power to find the assumed effect is reported
+  as `inconclusive_underpowered` and may not be read as falsifying H2.
 - Vendor self-reported numbers are never mixed into a results table with
   numbers measured here.
 - Hardware, batch size, and checkpoint are recorded with every latency figure,
@@ -182,6 +187,7 @@ environment (report the harness alone and drop the empirical claims).
 | 4 | LLM structured-output baseline on the same items | Not started |
 | 5 | Write-up: coverage at a fixed error budget, with honest limitations | Not started |
 | 6 | Significance layer: an interval on every audited quantity, and an ECE noise floor | Done |
+| 7 | Pre-registration and power: the sample size and threshold fixed before the run | Done |
 
 No adapter to Laya is included in this commit on purpose. The package's Python
 call signature could not be verified from this environment, and guessing at an
@@ -397,3 +403,113 @@ the harness, not any model.
 - Laya repository, re-checked 2026-09-30 for the calibration re-check and the
   ECE discrepancy noted under milestone 6:
   <https://github.com/NandhaKishorM/laya>
+
+---
+
+## Findings from milestone 7 (2026-10-01)
+
+Milestone 7 exists because milestone 6 left the project able to compute its
+criteria but unable to act on a negative result. An interval that fails to
+exclude the null reads identically whether the effect is absent or the sample
+was too small to see it, and only the first falsifies H2. The roadmap also
+gates milestone 2 on choosing the instability threshold *before* the run,
+"since choosing it after seeing the results is the same defect the
+disjoint-split rule exists to prevent" — a rule that lived in prose until now.
+`src/system1_audit/prereg.py` moves both into the library.
+
+All numbers below are measured against the synthetic deciders in the test
+suite. They are properties of the harness and of binomial arithmetic, not
+evidence about any real model, and no novelty is claimed for any of them.
+
+**1. Collecting more items can lose the power the plan registered.**
+
+Exact binomial power is not monotone in `n`, because the rejection count is an
+integer. At a 5 percent threshold and 95 percent confidence, the verdict needs
+5 unstable items at `n = 33` and 6 at `n = 34`, so:
+
+| items | unstable needed | power against a true rate of 0.20 |
+|---|---|---|
+| 32 | 5 | 0.7956 |
+| 33 | 5 | **0.8179** |
+| 34 | 6 | **0.7004** |
+| 38 | 6 | 0.7996 |
+| 39 | 6 | 0.8200 |
+
+A plan that registered 33 items and then collected 34 would be underpowered by
+its own criterion with no step having been wrong. `SampleSize.stable_from`
+therefore reports the count beyond which no larger sample in range dips below
+the requested power — 39 here — and `plan_for_rate` registers that instead of
+the first qualifying count. One test pins the 33/34 pair, so the warning is a
+measured property rather than a hedge.
+
+**2. A fixed item budget caps the finding before the audit starts.**
+
+`detectable_rate` answers the question a real audit faces. Against a 5 percent
+threshold at 95 percent confidence and 80 percent power, the smallest true
+instability rate that could be resolved at all is 0.1905 at 40 items, 0.1340 at
+100, 0.0926 at 300 and 0.0814 at 500. Below those the audit cannot produce the
+finding however it comes out, which is worth knowing before a model is called
+rather than after.
+
+**3. Milestone 6's underpowered position verdict reproduces, and resolves at
+150 items.**
+
+Milestone 6 recorded that with a weak planted bias (`position_weight = 0.02`)
+against heavy noise at 60 items, the sign of the deviation on the biased
+position was recovered in all 8 trials but only 2 of 8 resolved it. That was
+read as a family-wise false positive problem. Measured properly with
+`empirical_power`, it is a power problem:
+
+| planted `position_weight` | items | verdict fired |
+|---|---|---|
+| 0.00 (null), no jitter | 60 | 0 of 40 |
+| 0.00 (null), jitter 0.3 | 60 | 1 of 40 |
+| 0.02 | 60 | 2 of 16 |
+| 0.02 | 150 | 14 of 16 |
+| 0.02 | 300 | 16 of 16 |
+| 0.05 | 60 | 20 of 20 |
+| 0.05 | 150 | 20 of 20 |
+| 0.05 | 300 | 20 of 20 |
+| 0.10 | 60, 150, 300 | 20 of 20 each |
+
+So the Bonferroni correction added in milestone 6 **is** controlling: under the
+null the verdict fired in 1 of 40 audits, inside its nominal 5 percent. The
+2-of-8 observation was the test running out of power at the weakest planted
+bias, and at that bias 150 items brings it to 14 of 16. This is the number
+milestone 2 needs for its per-position criterion, and it was not derivable —
+the verdict rests on a percentile bootstrap, so `empirical_power` simulates it
+and returns a Wilson interval, because a power estimated from 16 simulated
+audits is itself a measurement on 16 items.
+
+**4. The demo's own order-sensitivity result does not settle anything.**
+
+Reading the demo's 8-item audit against the plan it should have had returns
+`inconclusive_underpowered` at power 0.203, 31 items short of the 39 the plan
+registers. The harness now says that about its own showcase output instead of
+printing a flip rate and leaving the reader to over-read it.
+
+**A pre-existing defect fixed in passing**
+
+`binomial_tail_at_least`, added in milestone 6, raised `OverflowError` for
+`n >= 1030` on correct input: it summed terms with exact integer coefficients,
+and `math.comb(1030, 515)` exceeds the largest representable float, so the
+multiplication failed before any arithmetic error could occur. The first call
+of `required_items_for_rate` with the default item cap hit it immediately. The
+tail is now anchored at the largest term in the summation range and walked
+outward with the pmf ratio, with the anchor computed through `lgamma`;
+anchoring matters because the terms span hundreds of orders of magnitude and
+summing from either end underflows before reaching the mass. Verified against
+the integer sum it replaced across 8 sample sizes, 6 probabilities and 12
+cut-points each: largest disagreement 3.3e-13. Two tests pin the regression at
+`n = 1500` and `n = 5000`. The rewrite also made the existing suite faster,
+13.1s to 7.1s, because terms are dropped once they stop moving the sum.
+
+**What this does not do**
+
+The plan covers the unstable-rate verdict only. `plan_id` is a reproducibility
+aid and not a security control: anyone who can edit a plan can recompute its
+digest, so it catches a plan that drifted, not one rewritten on purpose.
+Nothing here is evidence about a real model, and milestone 2 remains blocked —
+arxiv.org and huggingface.co were both refused by this environment's egress
+policy again on 2026-10-01, so arXiv:2609.30454 is still unread, no checkpoint
+can be fetched, and no novelty is claimed anywhere.
