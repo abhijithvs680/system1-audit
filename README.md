@@ -27,8 +27,9 @@ assumed.
 Early. The metric layer is implemented and unit-tested, temperature fitting is
 held to a disjoint fit/report split by the library rather than by the caller's
 discipline, every audited quantity carries an interval so a point estimate
-cannot be over-read, and the sample size and threshold are fixed in a
-pre-registered plan before a model is called. No real model has been audited
+cannot be over-read, the sample size and threshold are fixed in a
+pre-registered plan before a model is called, and a vote over several display
+orders is charged the forward passes it used. No real model has been audited
 yet. See
 `RESEARCH_NOTES.md` for the hypothesis, the sources, and what is deliberately
 not claimed.
@@ -131,6 +132,29 @@ print(outcome.falsifies_hypothesis)  # True only for not_supported
 fails to exclude the null looks identical whether the effect is absent or the
 sample was too small to see it, and only the first falsifies anything.
 
+If you are already paying for several display orders, aggregate them into one
+decision and let the harness charge the passes it took. The gain over the
+single-pass baseline is a paired interval, because both strategies answer the
+same items:
+
+```python
+from system1_audit import compare_strategies, first_order, mean_probability
+
+comparison = compare_strategies(
+    audit, risk_budget=0.10, baseline=first_order, candidate=mean_probability
+)
+print(comparison.coverage_gain)              # paired, over items
+print(comparison.verdict)                    # coverage_gain_resolved | ... | no_op
+print(comparison.extra_passes_per_item)      # what the gain cost
+```
+
+On an order-invariant model this returns `no_op` with a zero-width interval,
+because every pass was the same call. Gate on `mean_probability`, not on
+`modal_vote`: a vote share takes at most `K + 1` distinct values, so it is a
+much weaker abstention signal than a probability, and on the synthetic fixtures
+it loses coverage outright at an unchanged accuracy. See
+`RESEARCH_NOTES.md`, milestone 8.
+
 ## What the metrics mean
 
 - **ECE** — equal-width binned gap between confidence and accuracy. The number
@@ -162,6 +186,20 @@ sample was too small to see it, and only the first falsifies anything.
   anything. It falls with `n` and rises with bin count: on the demo's
   confidence profile the 95th percentile floor is 0.19 at n=40, 0.085 at
   n=200 and 0.037 at n=1000.
+- **Threshold-feasible coverage** — coverage an actual confidence cutoff
+  delivers. `coverage_at_risk` walks the risk-coverage curve one item at a time,
+  so its answer can stop inside a group of equally confident items; a cutoff
+  cannot, because it answers every item at or above it. The two agree when
+  confidences are distinct and diverge sharply for a vote share. Only this one is
+  implementable.
+- **Coverage per pass** — threshold-feasible coverage divided by the forward
+  passes the strategy used. Read the ceiling with it: coverage cannot exceed 1.0,
+  so this cannot exceed `1 / passes`, and a one-pass baseline above `1/K` wins by
+  construction. Fair only between strategies costing the same number of passes.
+- **Paired gain** — difference between two aggregation strategies, resampled over
+  items with both strategies recomputed on each resample. Two independent
+  intervals on two overlapping quantities cannot answer whether the difference is
+  real.
 - **Interval** — a point estimate with bounds and the method that produced
   them. `excludes(0.0)` is the operational reading of "distinguishable from
   zero" at that level. It is not a p-value.
@@ -263,6 +301,16 @@ sample was too small to see it, and only the first falsifies anything.
   confidence profile". Clearing it says something beyond binning noise is
   present, not in which direction — `CalibrationReport.overconfidence` is the
   signed quantity.
+- `voting.py` can price one aggregation strategy against another, in forward
+  passes. It cannot price voting against a *larger model*, which is the second
+  half of H3 in `RESEARCH_NOTES.md`, because that needs the larger model's
+  coverage at its own cost. The within-model question is the only one it answers.
+- The aggregation results in milestone 8 are measured on the synthetic deciders,
+  whose defects are of exactly the kind averaging cancels: the jitter is drawn
+  per display order and the position term sits on one display slot, so averaging
+  over orders removes both by construction. That `mean_probability` reaches
+  accuracy 1.0 on those fixtures is a property of the fixture and not a
+  prediction about any model.
 - No real model has been audited. Every number in `examples/demo.py` comes from
   a synthetic decider and describes the harness, not any product.
 

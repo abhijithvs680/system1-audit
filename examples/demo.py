@@ -13,15 +13,20 @@ from __future__ import annotations
 from system1_audit import (
     audit_dataset,
     calibration_report,
+    compare_strategies,
     detectable_rate,
     ece_noise_floor,
+    first_order,
     held_out_calibration,
+    mean_probability,
+    modal_vote,
     order_sensitivity_significance,
     plan_for_rate,
     power_curve,
     required_items_for_rate,
     risk_coverage_curve,
     split_questions,
+    strategy_report,
 )
 from system1_audit.deciders import SyntheticDecider
 from system1_audit.types import ChoiceQuestion
@@ -225,6 +230,41 @@ def main() -> None:
         print(f"  n={n_items:<5d} smallest resolvable rate over 0.05: {rate:.4f}")
     print("  note: at 40 items an instability rate under 0.19 cannot be put above")
     print("        a 5 percent threshold at all, however the audit comes out.")
+
+    print()
+    print("AGGREGATING THE DISPLAY ORDERS, CHARGED PER FORWARD PASS")
+    budget = 0.10
+    for strategy in (first_order, mean_probability, modal_vote):
+        report = strategy_report(audit, strategy, budget, n_resamples=400, seed=1)
+        print(
+            f"  {report.name:17s} passes={report.passes_per_item} "
+            f"acc {report.accuracy:.4f}  prefix cov {report.coverage_at_risk:.4f}  "
+            f"threshold cov {report.threshold_coverage:.4f}  "
+            f"distinct conf {report.distinct_confidences}"
+        )
+    print(f"  note: coverage is at a {budget:.0%} error budget. The prefix column can")
+    print("        stop inside a group of tied confidences, which no real threshold")
+    print("        can do, so the threshold column is the one a deployment gets.")
+
+    print()
+    print("IS THE VOTE WORTH ITS PASSES")
+    for candidate in (mean_probability, modal_vote):
+        comparison = compare_strategies(
+            audit, budget, first_order, candidate, n_resamples=400, seed=1
+        )
+        print(f"  {comparison.candidate.name} vs {comparison.baseline.name}")
+        print(f"    accuracy gain    {comparison.accuracy_gain}")
+        print(f"    coverage gain    {comparison.coverage_gain}")
+        print(
+            f"    verdict          {comparison.verdict} "
+            f"(+{comparison.extra_passes_per_item} passes per item)"
+        )
+    print("  note: the intervals are paired over items, because both strategies")
+    print("        answered the same questions. On these 8 curated items neither")
+    print("        gain resolves, which is the honest reading at this sample size")
+    print("        and not a finding either way. The 150-item measurement, where")
+    print("        a vote share holds accuracy and loses coverage outright, is in")
+    print("        RESEARCH_NOTES.md under milestone 8.")
 
     outcome = plan.evaluate(significance)
     print()

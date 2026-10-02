@@ -76,10 +76,24 @@ from .splits import (
     split_questions,
 )
 from .types import ChoiceDecider, ChoiceDecision, ChoiceQuestion
+from .voting import (
+    AggregatedDecision,
+    StrategyReport,
+    VotingComparison,
+    aggregate,
+    aligned_vectors,
+    compare_strategies,
+    first_order,
+    mean_probability,
+    modal_vote,
+    strategy_report,
+    threshold_feasible_coverage,
+)
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "AggregatedDecision",
     "CalibrationReport",
     "ChoiceDecider",
     "ChoiceDecision",
@@ -98,7 +112,11 @@ __all__ = [
     "SampleSize",
     "SelectiveReport",
     "Split",
+    "StrategyReport",
+    "VotingComparison",
     "achieved_power",
+    "aggregate",
+    "aligned_vectors",
     "apply_temperature",
     "audit_dataset",
     "audit_question",
@@ -110,6 +128,7 @@ __all__ = [
     "calibration_report",
     "check_disjoint",
     "clopper_pearson_interval",
+    "compare_strategies",
     "detectable_rate",
     "deterministic_split",
     "ece_noise_floor",
@@ -117,10 +136,13 @@ __all__ = [
     "equal_mass_bins",
     "equal_width_bins",
     "expected_calibration_error",
+    "first_order",
     "fit_temperature",
     "held_out_calibration",
     "maximum_calibration_error",
+    "mean_probability",
     "minimum_unstable_items",
+    "modal_vote",
     "negative_log_likelihood",
     "normal_quantile",
     "order_sensitivity_significance",
@@ -131,5 +153,7 @@ __all__ = [
     "sample_permutations",
     "selective_coverage_interval",
     "split_questions",
+    "strategy_report",
+    "threshold_feasible_coverage",
     "wilson_interval",
 ]

@@ -143,6 +143,12 @@ All three are falsifiable and none requires access to Jev.
   `plan_id` it answers. Enforced by `prereg.py` since milestone 7. A null
   result on a sample without the power to find the assumed effect is reported
   as `inconclusive_underpowered` and may not be read as falsifying H2.
+- A vote over several display orders is charged the forward passes it used, and
+  a gain over a cheaper strategy is reported as a *paired* interval over the
+  same items. Enforced by `voting.py` since milestone 8. Coverage is reported as
+  the number an actual confidence threshold delivers, not the prefix-curve
+  number, which can stop inside a group of tied confidences and so cannot be
+  implemented.
 - Vendor self-reported numbers are never mixed into a results table with
   numbers measured here.
 - Hardware, batch size, and checkpoint are recorded with every latency figure,
@@ -155,6 +161,12 @@ the open checkpoint (the interesting finding disappears); arXiv:2609.30454
 already reports the same permutation result with a stronger method (no novelty
 left, cite it instead); or three milestones pass without a runnable GPU
 environment (report the harness alone and drop the empirical claims).
+
+**The third clause is now met.** Milestones 6, 7 and 8 all ran with no model
+environment — re-tested on 2026-09-30, 2026-10-01 and 2026-10-02. Milestone 5
+should therefore be written up as a harness-only report, with the empirical
+H1/H2/H3 claims dropped rather than left pending, unless a model environment
+becomes available first. See the milestone 8 findings.
 
 ---
 
@@ -188,6 +200,7 @@ environment (report the harness alone and drop the empirical claims).
 | 5 | Write-up: coverage at a fixed error budget, with honest limitations | Not started |
 | 6 | Significance layer: an interval on every audited quantity, and an ECE noise floor | Done |
 | 7 | Pre-registration and power: the sample size and threshold fixed before the run | Done |
+| 8 | Vote aggregation priced per forward pass, with a paired interval on the gain | Done |
 
 No adapter to Laya is included in this commit on purpose. The package's Python
 call signature could not be verified from this environment, and guessing at an
@@ -403,6 +416,12 @@ the harness, not any model.
 - Laya repository, re-checked 2026-09-30 for the calibration re-check and the
   ECE discrepancy noted under milestone 6:
   <https://github.com/NandhaKishorM/laya>
+- Laya README, retrieved **as the raw file** on 2026-10-02 (100,070 bytes),
+  which is what resolved that discrepancy -- the two earlier readings came
+  through a summarising fetch:
+  <https://raw.githubusercontent.com/NandhaKishorM/laya/main/README.md>
+- arXiv:2609.30454: still refused on 2026-10-02 (`CONNECT tunnel failed,
+  response 403`). Unread on every attempt to date.
 
 ---
 
@@ -513,3 +532,158 @@ Nothing here is evidence about a real model, and milestone 2 remains blocked —
 arxiv.org and huggingface.co were both refused by this environment's egress
 policy again on 2026-10-01, so arXiv:2609.30454 is still unread, no checkpoint
 can be fetched, and no novelty is claimed anywhere.
+
+---
+
+## Findings from milestone 8 (2026-10-02)
+
+Milestone 8 builds the half of H3 that can be built without a model. H3 says the
+operational quantity is coverage at a fixed error budget, not accuracy, and that
+voting across option permutations may buy more of it per unit latency than a
+larger model would. `permutation.audit_dataset` already reported
+`accuracy_first_order` beside `accuracy_modal_vote`, which compares the wrong
+quantity and does not charge the vote for the `K` forward passes it took.
+`voting.py` aggregates the transcript the audit already collected -- no extra
+model calls -- scores each strategy on coverage at a fixed budget, and reports
+the difference between two strategies with a **paired** bootstrap over items.
+
+**Read this before any number below.** The deciders here are the synthetic ones
+from the test suite, and their defects are of exactly the kind that averaging
+cancels: `SyntheticDecider` draws its jitter from a seed that includes the
+display order, so each order gets an independent draw and the position term is a
+constant on one display slot. Averaging over orders therefore removes both, by
+construction. That is why `mean_probability` reaches accuracy 1.0000 in two
+regimes below. **Those two numbers are a property of the fixture and are not a
+prediction about any real model.** They are reported because they confirm the
+aggregation code does what it says; the transferable results are findings 1, 2
+and 3, which are about the *metric*.
+
+Measured on 150 items, 4 options, 8 display orders, a 10% error budget, 2,000
+resamples, seed 1.
+
+**1. Voting on an order-invariant model is an exact no-op, and the harness now
+says so instead of reporting noise.**
+
+On a decider that ignores display order, all `K` passes are one call repeated,
+so no aggregation can change a decision. Measured gain is exactly zero, with a
+zero-width interval, and the verdict is `no_op`. This is the invariant that
+makes every positive number in this module readable: a harness that reported a
+gain here would be measuring its own resampling noise.
+
+Two defects were found by that test, and both are fixed:
+
+- The no-op detector first compared confidences for **bitwise** equality and
+  missed a provable no-op. Averaging `K` bitwise-identical floats does not
+  return that float -- the mean of six copies of `0.7` is `0.7000000000000001`,
+  a residue of `1.11e-16`. The labels were identical and the vectors going in
+  were identical, and the comparison still fell through to the bootstrap.
+  Confidences are now compared against a documented `1e-12` tolerance.
+- The verdict for a zero-width interval at zero was `unresolved`, which reads as
+  "the sample was too small to tell". It is the opposite: the difference was
+  identical on every resample. That case is now `no_difference_measured`, and
+  `unresolved` is reserved for an interval that straddles zero with non-zero
+  width -- the distinction milestone 6 exists to make.
+
+**2. A vote share is not a usable selective-prediction gate. This is the
+operational finding, and it is negative.**
+
+With a position bias planted at `position_weight=0.5`, `modal_vote` against the
+single-pass baseline:
+
+| Quantity | Single pass | Modal vote | Paired gain (95%) |
+|---|---|---|---|
+| accuracy | 0.2533 | 0.2533 | `0.0000 [0.0000, 0.0000]` |
+| coverage at 10% risk | 0.2800 | 0.0000 | `-0.2800 [-0.3600, -0.2000]` |
+| distinct confidence values | 150 | **1** | |
+
+Verdict `coverage_loss_resolved`: the interval excludes zero on the downside.
+Eight forward passes per item bought **no** accuracy and destroyed the selective
+number outright. The mechanism is visible in the last row. `modal_share` takes
+at most `K + 1` values, and here every one of the 150 items had the same vote
+share, so the confidence carries no ordering at all and no threshold can select
+a lower-error subset. Accuracy is blind to this because accuracy never consults
+the confidence.
+
+This is a design lesson that transfers off the fixture: if a system votes over
+permutations and then gates on the vote share, it has replaced a continuous
+confidence with a near-constant one and given up abstention. Averaging the
+probability vectors instead keeps 150 distinct values and keeps the gate.
+
+**3. The prefix risk-coverage curve reports coverage no threshold can deliver.**
+
+`SelectiveReport.coverage_at_risk` walks the curve one item at a time, so its
+answer can stop in the middle of a group of equally confident items. A
+deployment cannot: a cutoff answers every item at or above it. In the row above,
+the prefix number for `modal_vote` is **0.0067** -- one item of 150 -- while the
+coverage any real threshold delivers is **0.0000**, because all 150 items tie
+and the cutoff takes all of them or none. `voting.threshold_feasible_coverage`
+reports the implementable number, and a test asserts it never exceeds the prefix
+number for any strategy. The two agree whenever confidences are distinct, which
+is why this went unnoticed until a strategy with a coarse confidence existed.
+
+**4. Coverage per pass has a ceiling that makes it useless as a verdict, and
+this limits what milestone 8 can say about H3.**
+
+`StrategyReport.coverage_per_pass` divides threshold-feasible coverage by the
+passes it cost. Coverage cannot exceed 1.0, so the quantity cannot exceed
+`1 / passes_per_item`: a one-pass baseline above `1/K` beats any `K`-pass
+strategy *by construction*. Measured in the order-invariant regime, single pass
+scores 1.0000 against voting's 0.1250 on identical coverage. The ratio is fair
+only between strategies costing the same passes, or against another model's
+coverage at that model's own pass cost. The docstring states the ceiling and a
+test asserts it.
+
+So the second half of H3 -- that voting beats *moving to a larger model* per
+unit latency -- is **not settled here and cannot be**, because it needs the
+larger model's coverage at its own cost. Milestone 8 settles only the
+within-model question: which aggregation to use if you are already paying for
+`K` passes. On these fixtures the answer is probability averaging, never the
+vote share. H3 stays open.
+
+**Still outstanding.** Milestones 2 and 4 were not attempted. Re-tested
+**2026-10-02**: arxiv.org was again refused by this session's egress policy
+(`CONNECT tunnel failed, 403`), so arXiv:2609.30454 remains unread and no
+novelty is claimed for any of the above; no model runtime is installed
+(`torch` absent) and no model credentials are available, so no checkpoint can be
+fetched and the LLM baseline cannot be run. This is the third consecutive
+milestone with no model environment, which meets the third clause of the stop
+condition. The recommendation is now explicit: **milestone 5 should be written
+up as a harness-only report**, and the empirical H1/H2/H3 claims dropped, unless
+a model environment becomes available.
+
+### Source re-check, 2026-10-02: the recorded ECE discrepancy is resolved
+
+The milestone 6 entry recorded a discrepancy it could not resolve -- the `laya`
+raw ECE read as **0.213** on 2026-09-28 and **0.466** on 2026-09-30 -- and noted
+that both readings came through a summarising fetch rather than the raw file.
+`raw.githubusercontent.com` was reachable from this session on 2026-10-02, so
+the README was retrieved directly (100,070 bytes). **Both readings were
+correct.** The figures are in different sections of the same file, and they are
+not the same quantity:
+
+| Figure | Where in the README | Stated sample |
+|---|---|---|
+| 0.175 | `laya` row, typed-decisions table | 400 cases, 2,000 decisions |
+| 0.213 | `laya-typed-decisions` row, same table | 400 cases, 2,000 decisions |
+| 0.246 | Jev's column, Jev-vs-Laya comparison table | not stated |
+| 0.144 | Jev, typed-decisions table and the prose below it | 400 cases, 2,000 decisions |
+| 0.466 | Calibration section, raw mean before refitting | not stated |
+| 0.733 / 0.571 | macro ECE, 51 languages, raw / as served | 5,100 cases |
+
+Two corrections follow, one of them to this file:
+
+- **This project's own note was wrong.** The 2026-09-28 entry attributes 0.213
+  to "`laya` English". 0.213 is the **`laya-typed-decisions`** row; the `laya`
+  row is 0.175. The error is this file's, not the README's.
+- The README reports Jev's ECE as both **0.246** and **0.144**, in a comparison
+  table and a benchmark table respectively.
+
+None of this says any figure is wrong. Plausibly they are different evaluation
+sets, and the typed-decisions table does state its sample size, which is more
+than most published calibration figures do. The point is the one milestone 6
+made and this now evidences from the primary source rather than from a summary:
+**"Laya's raw ECE" is not a single number**, no bin count is given for any of
+them, and three of the six have no sample size, so a reader cannot line any two
+of them up -- including the raw-versus-post-fit pair that motivated this
+project. Quoting one of them as *the* raw ECE is the mistake, and this file made
+it twice.
