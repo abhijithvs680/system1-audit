@@ -746,6 +746,29 @@ class TestSelectiveCoverageInterval(unittest.TestCase):
         self.assertAlmostEqual(iv.point, 0.0, places=12)
         self.assertAlmostEqual(iv.upper, 0.0, places=12)
 
+    def test_interval_bounds_the_achievable_coverage_not_the_curve_bound(self):
+        # Few distinct confidences, as a vote share or a coarse score produces.
+        # The curve's bound stops inside a tie group; no cutoff can, so the
+        # interval has to be built on the number a cutoff delivers.
+        import random
+
+        from system1_audit.selective import risk_coverage_curve
+
+        rng = random.Random(7)
+        confidences = [rng.choice([0.5, 0.625, 0.75, 0.875]) for _ in range(60)]
+        correct = [rng.random() < (c + 0.1) for c in confidences]
+        report = risk_coverage_curve(confidences, correct)
+        bound = report.coverage_at_risk(0.10)
+        achievable = report.feasible_coverage_at_risk(0.10)
+        # Confirm the fixture actually exercises the gap, so the test cannot
+        # pass vacuously if the curve and the cutoff happen to agree.
+        self.assertGreater(bound, achievable)
+        iv = selective_coverage_interval(
+            confidences, correct, target_risk=0.10, n_resamples=800, seed=3
+        )
+        self.assertAlmostEqual(iv.point, achievable, places=12)
+        self.assertLess(iv.point, bound)
+
     def test_point_estimate_matches_the_curve(self):
         confidences = [0.95, 0.9, 0.85, 0.8, 0.7, 0.6, 0.55, 0.5]
         correct = [True, True, True, False, True, False, False, True]

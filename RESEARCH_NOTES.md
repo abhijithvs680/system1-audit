@@ -201,6 +201,7 @@ becomes available first. See the milestone 8 findings.
 | 6 | Significance layer: an interval on every audited quantity, and an ECE noise floor | Done |
 | 7 | Pre-registration and power: the sample size and threshold fixed before the run | Done |
 | 8 | Vote aggregation priced per forward pass, with a paired interval on the gain | Done |
+| 9 | A selective-prediction operating point a deployment can actually set | Done |
 
 No adapter to Laya is included in this commit on purpose. The package's Python
 call signature could not be verified from this environment, and guessing at an
@@ -687,3 +688,93 @@ them, and three of the six have no sample size, so a reader cannot line any two
 of them up -- including the raw-versus-post-fit pair that motivated this
 project. Quoting one of them as *the* raw ECE is the mistake, and this file made
 it twice.
+
+---
+
+## Findings from milestone 9 (2026-10-03)
+
+Milestone 5 is the write-up of "coverage at a fixed error budget". This
+milestone was taken first because the quantity that write-up reports was not
+the one the library returned.
+
+Milestone 8 found that the risk-coverage curve can report coverage no real
+cutoff delivers, and added `threshold_feasible_coverage` to `voting.py` to
+report the implementable number for an aggregation strategy. The correction did
+not reach the selective-prediction module itself. `SelectiveReport` still
+answered with the curve prefix, and that is what the README quickstart, the
+demo, and `significance.selective_coverage_interval` all called.
+
+### Finding 1: the reported threshold could breach the budget it was given
+
+Not a bias, an inconsistency. `coverage_at_risk` and `threshold_at_risk` were
+independent maximisations over the same curve, so the pair described an
+operating point that does not exist. On four items with confidences
+`[0.9, 0.9, 0.9, 0.5]` and the third one wrong, at a **zero** error budget:
+
+| quantity | value |
+|---|---|
+| `coverage_at_risk(0.0)` | 0.5 |
+| `threshold_at_risk(0.0)` | 0.9 |
+| coverage that cutoff really answers | 0.75 |
+| **error rate that cutoff really carries** | **0.333** |
+| largest coverage any cutoff delivers at budget 0.0 | 0.0 |
+
+A caller setting the returned threshold carries a third of its answered traffic
+wrong, against a budget of none of it. The curve point stopped after two of the
+three tied items; a cutoff at 0.9 cannot, so it also takes the wrong one. For a
+guardrail layer the sign of the error is the bad direction: the number is
+reported as *within* budget.
+
+The fix makes the operating point the unit of reporting. `operating_point`
+returns a threshold with the coverage and the error rate it realises, so the
+three are consistent by construction, and the threshold is selected on realised
+risk. `feasible_coverage_at_risk` is the coverage alone. `coverage_at_risk` is
+kept and documented as a bound, which is a genuine answer to "can any cutoff
+beat this" and the wrong answer to "where do I set the threshold".
+
+The reachable points turn out to be identifiable from the curve alone: it is
+sorted by descending confidence, so the items at or above any confidence form an
+unbroken prefix, and the last point of each tie group is exactly the state of a
+cutoff set there. `feasible_points` returns those. That also makes the free
+function O(n log n) rather than the O(n^2) threshold scan milestone 8 used, and
+it now lives in `selective.py` beside the curve it is derived from, re-exported
+from `voting.py`.
+
+### Finding 2: a bootstrap over distinct confidences still needs the tie fix
+
+This was the surprise. The tie correction looks irrelevant when the observed
+confidences are all distinct, which is the normal case for a probability output,
+so it would be easy to treat it as a vote-share-only concern. It is not, for any
+resampled quantity: the bootstrap draws with replacement, so duplicates — and
+therefore ties — appear in essentially every resample, and on each one the
+prefix statistic can return coverage no cutoff could deliver. An interval built
+that way bounds an unachievable quantity. `selective_coverage_interval` now
+resamples `feasible_coverage_at_risk`.
+
+The remaining bias in that function is the in-sample maximisation, which this
+does not touch, and the README still says so.
+
+### Measured gap
+
+60 items over 4 distinct confidence values, as a coarse score or a vote share
+produces, at a 10 percent error budget: the curve bound is 0.5500 and the best
+any cutoff achieves is 0.4167. The interval's point estimate was the first
+number and is now the second. The demo's own profile has distinct confidences
+and is unchanged by this, which is the expected result and the reason a
+synthetic tied fixture carries the test.
+
+### Honest limitation
+
+Both findings are properties of the harness, established on constructed inputs
+with hand-computed answers and on property checks over randomised tie patterns.
+Neither is a measurement of any model. The tied-confidence case is reached by
+real systems — a vote share over K passes takes at most K+1 values, and a coarse
+ordinal score few more — but how often it binds on a System-1 checkpoint is
+unmeasured, because no checkpoint has been audited.
+
+### Gates, re-tested 2026-10-03
+
+Unchanged, so milestones 2 and 4 remain blocked: arxiv.org refused by this
+environment's egress policy (`CONNECT tunnel failed, response 403`), so
+arXiv:2609.30454 is **still unread** and no novelty is claimed for anything
+above; `torch` and `transformers` both absent; no model credentials present.

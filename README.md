@@ -29,8 +29,9 @@ held to a disjoint fit/report split by the library rather than by the caller's
 discipline, every audited quantity carries an interval so a point estimate
 cannot be over-read, the sample size and threshold are fixed in a
 pre-registered plan before a model is called, and a vote over several display
-orders is charged the forward passes it used. No real model has been audited
-yet. See
+orders is charged the forward passes it used, and the selective-prediction
+operating point is one a deployment can actually set rather than a point on a
+curve. No real model has been audited yet. See
 `RESEARCH_NOTES.md` for the hypothesis, the sources, and what is deliberately
 not claimed.
 
@@ -88,8 +89,18 @@ report = calibration_report(probabilities, correct_index)
 print(report.ece, report.adaptive_ece, report.brier, report.overconfidence)
 
 selective = risk_coverage_curve(confidences, correct)
-print(selective.coverage_at_risk(target_risk=0.02))
+point = selective.operating_point(target_risk=0.02)
+if point is None:
+    print("no cutoff meets that budget")
+else:
+    # threshold, coverage and risk all describe the same cutoff.
+    print(point.threshold, point.coverage, point.risk)
 ```
+
+`coverage_at_risk` is also there and reports a *bound* rather than an operating
+point: it maximises over every point on the curve, including points that stop
+inside a group of equally confident items. Prefer `operating_point`, or
+`feasible_coverage_at_risk` for the coverage alone.
 
 To report a post-temperature number, let the harness hold the split. The
 assignment hashes each item's own identifier, so it is identical across
@@ -187,11 +198,19 @@ it loses coverage outright at an unchanged accuracy. See
   confidence profile the 95th percentile floor is 0.19 at n=40, 0.085 at
   n=200 and 0.037 at n=1000.
 - **Threshold-feasible coverage** — coverage an actual confidence cutoff
-  delivers. `coverage_at_risk` walks the risk-coverage curve one item at a time,
-  so its answer can stop inside a group of equally confident items; a cutoff
-  cannot, because it answers every item at or above it. The two agree when
-  confidences are distinct and diverge sharply for a vote share. Only this one is
-  implementable.
+  delivers, from `feasible_coverage_at_risk` or the `operating_point` that
+  carries it. `coverage_at_risk` walks the risk-coverage curve one item at a
+  time, so its answer can stop inside a group of equally confident items; a
+  cutoff cannot, because it answers every item at or above it. The two agree
+  when confidences are distinct and diverge sharply for a vote share. Only this
+  one is implementable, which is why it, and not the curve bound, is what
+  `selective_coverage_interval` puts an interval around.
+- **Operating point** — a threshold together with the coverage *and the error
+  rate* it realises, from `operating_point`. The three are consistent by
+  construction: applying the threshold reproduces the other two. Reading a
+  coverage off the curve and a threshold off the same point does not have that
+  property, and could hand back a cutoff that breaches the budget it was asked
+  for.
 - **Coverage per pass** — threshold-feasible coverage divided by the forward
   passes the strategy used. Read the ceiling with it: coverage cannot exceed 1.0,
   so this cannot exceed `1 / passes`, and a one-pass baseline above `1/K` wins by
@@ -294,9 +313,19 @@ it loses coverage outright at an unchanged accuracy. See
   plan that was rewritten on purpose.
 - `required_items_for_rate` establishes `stable_from` only within `max_items`,
   which defaults to 500. A plan needing more has to say so and pay the scan.
-- `selective_coverage_interval`'s point estimate is optimistically biased,
-  because `coverage_at_risk` maximises over a curve computed on the same data.
-  The interval says how much of the number is real; the point estimate does not.
+- `selective_coverage_interval`'s point estimate is still optimistically
+  biased, because it maximises over a curve computed on the same data. One of
+  the two biases is gone: it now resamples the coverage a real cutoff delivers,
+  which matters for a bootstrap even on distinct confidences, since drawing
+  with replacement creates ties in nearly every resample. What remains is the
+  in-sample maximisation. The interval says how much of the number is real; the
+  point estimate does not.
+- `coverage_at_risk` is kept, and is a bound rather than an operating point. It
+  is the right number for "no cutoff can beat this" and the wrong one for
+  "set the threshold here". On the demo's own confidence profile the two agree,
+  because its confidences are distinct; on a coarse score or a vote share they
+  do not. One measured case: 60 items over 4 distinct confidence values at a
+  10 percent budget, bound 0.5500 against an achievable 0.4167.
 - The ECE noise floor tests the joint null "perfectly calibrated, given this
   confidence profile". Clearing it says something beyond binning noise is
   present, not in which direction — `CalibrationReport.overconfidence` is the

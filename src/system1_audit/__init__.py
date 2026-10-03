@@ -51,7 +51,13 @@ from .prereg import (
     power_curve,
     required_items_for_rate,
 )
-from .selective import RiskCoveragePoint, SelectiveReport, risk_coverage_curve
+from .selective import (
+    OperatingPoint,
+    RiskCoveragePoint,
+    SelectiveReport,
+    risk_coverage_curve,
+    threshold_feasible_coverage,
+)
 from .significance import (
     Interval,
     NoiseFloor,
@@ -87,7 +93,6 @@ from .voting import (
     mean_probability,
     modal_vote,
     strategy_report,
-    threshold_feasible_coverage,
 )
 
 __version__ = "0.1.0"
@@ -101,6 +106,7 @@ __all__ = [
     "HeldOutCalibration",
     "Interval",
     "NoiseFloor",
+    "OperatingPoint",
     "OrderSensitivitySignificance",
     "PermutationAudit",
     "PermutationResult",

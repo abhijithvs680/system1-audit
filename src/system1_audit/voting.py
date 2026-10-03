@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from typing import Callable, Sequence
 
 from .permutation import PermutationAudit, PermutationResult
-from .selective import risk_coverage_curve
+from .selective import risk_coverage_curve, threshold_feasible_coverage
 from .significance import Interval, bootstrap_interval, wilson_interval
 
 # A strategy turns one item's permutation transcript into a single decision:
@@ -216,33 +216,6 @@ def modal_vote(result: PermutationResult) -> tuple[str, float]:
 # --------------------------------------------------------------------------
 # Threshold-feasible coverage
 # --------------------------------------------------------------------------
-
-
-def threshold_feasible_coverage(
-    confidences: Sequence[float], correct: Sequence[bool], target_risk: float
-) -> float:
-    """Largest coverage a real confidence cutoff delivers under the budget.
-
-    ``SelectiveReport.coverage_at_risk`` walks the curve one item at a time, so
-    its answer can fall in the middle of a group of equally confident items. A
-    deployment cannot do that: a cutoff answers every item at or above it. With
-    continuous confidences the two agree; with a vote share they do not, and
-    only this one is implementable.
-    """
-    if len(confidences) != len(correct):
-        raise ValueError("confidences and correct must have equal length")
-    if not confidences:
-        raise ValueError("need at least one observation")
-    if not 0.0 <= target_risk <= 1.0:
-        raise ValueError("target_risk must be in [0, 1]")
-    n = len(confidences)
-    best = 0.0
-    for threshold in sorted(set(confidences), reverse=True):
-        answered = [i for i in range(n) if confidences[i] >= threshold]
-        errors = sum(1 for i in answered if not correct[i])
-        if errors / len(answered) <= target_risk:
-            best = max(best, len(answered) / n)
-    return best
 
 
 # --------------------------------------------------------------------------

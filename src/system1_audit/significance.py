@@ -694,15 +694,22 @@ def selective_coverage_interval(
     n_resamples: int = _DEFAULT_RESAMPLES,
     seed: int = 0,
 ) -> Interval:
-    """Bootstrap interval for coverage at a fixed error budget.
+    """Bootstrap interval for the coverage a real cutoff delivers under budget.
 
-    ``SelectiveReport.coverage_at_risk`` takes the largest coverage whose
-    *empirical* risk is under budget, maximising over a noisy curve. That is an
-    optimistically biased estimate of the coverage the same threshold would
-    deliver on new traffic, and the bias is worst where it matters most -- at a
-    tight error budget, where the qualifying prefix is short. The point
-    estimate here inherits that bias; the interval is what says how much of the
-    number is real.
+    The statistic resampled here is ``feasible_coverage_at_risk``, not
+    ``coverage_at_risk``. The distinction is not cosmetic for a bootstrap even
+    when the observed confidences are all distinct: resampling draws with
+    replacement, so duplicates -- and therefore ties -- appear in essentially
+    every resample, and on each one the curve-prefix statistic can report
+    coverage no cutoff could deliver. Bounding an unachievable quantity would
+    make the interval unachievable too.
+
+    One bias is fixed by this and one is not. Answering all of a tie group
+    rather than part of it is now accounted for. Still present: the point
+    estimate maximises over a curve computed on the same data, so it is an
+    optimistic estimate of what the same threshold yields on new traffic, worst
+    at a tight budget where few items qualify. The interval is what says how
+    much of the number is real.
 
     Reported as a bounded quantity: the resampled statistic is a coverage, so
     a lower bound of 0.0 is a genuine answer and not a failure.
@@ -716,6 +723,6 @@ def selective_coverage_interval(
     def coverage(sample: Sequence[tuple[float, bool]]) -> float:
         confs = [c for c, _ in sample]
         hits = [h for _, h in sample]
-        return risk_coverage_curve(confs, hits).coverage_at_risk(target_risk)
+        return risk_coverage_curve(confs, hits).feasible_coverage_at_risk(target_risk)
 
     return bootstrap_interval(pairs, coverage, confidence, n_resamples, seed)

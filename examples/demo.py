@@ -148,11 +148,18 @@ def main() -> None:
     print("SELECTIVE PREDICTION")
     print(f"  risk at full cover {selective.full_coverage_risk:.3f}")
     print(f"  AURC               {selective.aurc:.3f}")
+    print("  bound is the curve's; cutoff is what a threshold actually delivers")
     for target in (0.0, 0.1, 0.25):
-        coverage = selective.coverage_at_risk(target)
-        threshold = selective.threshold_at_risk(target)
-        shown = "none" if threshold is None else f"{threshold:.3f}"
-        print(f"  risk <= {target:.2f}       coverage {coverage:.3f} at threshold {shown}")
+        bound = selective.coverage_at_risk(target)
+        point = selective.operating_point(target)
+        if point is None:
+            print(f"  risk <= {target:.2f}       bound {bound:.3f}  cutoff none")
+            continue
+        print(
+            f"  risk <= {target:.2f}       bound {bound:.3f}  "
+            f"cutoff {point.threshold:.3f} covers {point.coverage:.3f} "
+            f"at risk {point.risk:.3f}"
+        )
 
     print()
     print("IS ANY OF IT DISTINGUISHABLE FROM ZERO?")
