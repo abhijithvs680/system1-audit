@@ -24,16 +24,26 @@ assumed.
 
 ## Status
 
-Early. The metric layer is implemented and unit-tested, temperature fitting is
-held to a disjoint fit/report split by the library rather than by the caller's
-discipline, every audited quantity carries an interval so a point estimate
-cannot be over-read, the sample size and threshold are fixed in a
-pre-registered plan before a model is called, and a vote over several display
-orders is charged the forward passes it used, and the selective-prediction
-operating point is one a deployment can actually set rather than a point on a
-curve. No real model has been audited yet. See
-`RESEARCH_NOTES.md` for the hypothesis, the sources, and what is deliberately
-not claimed.
+**Closed.** The harness is complete and tested; the audit it was built for never
+ran.
+
+Implemented: the metric layer, with temperature fitting held to a disjoint
+fit/report split by the library rather than by the caller's discipline; an
+interval on every audited quantity, so a point estimate cannot be over-read; a
+noise floor beside every ECE; a sample size and threshold fixed in a
+pre-registered plan before a model is called; aggregation over display orders
+charged the forward passes it used; and a selective-prediction operating point a
+deployment can actually set rather than a point on a curve.
+
+**No real model was ever audited** — no model runtime, no credentials, and
+arXiv:2609.30454 was unreadable from this environment on all five attempts, so no
+novelty is claimed anywhere.
+
+- **`REPORT.md`** — the write-up: what the harness establishes, what it does not,
+  the honest limitations, and the exact conditions to resume the empirical work.
+- **`RESEARCH_NOTES.md`** — the hypotheses, the sources with retrieval dates, and
+  the corrections this project made to its own method.
+- **`examples/report_numbers.py`** — regenerates every figure in the report.
 
 ## Why these three
 

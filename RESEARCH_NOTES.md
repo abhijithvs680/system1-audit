@@ -194,10 +194,10 @@ becomes available first. See the milestone 8 findings.
 | # | Milestone | Status |
 |---|---|---|
 | 1 | Dependency-free metric layer; self-validating tests against planted defects | Done |
-| 2 | Adapter for an open checkpoint; needs a GPU or patient CPU environment | Not started |
+| 2 | Adapter for an open checkpoint; needs a GPU or patient CPU environment | Closed, blocked -- no model environment |
 | 3 | Disjoint fit/report split discipline, enforced by the library | Done |
-| 4 | LLM structured-output baseline on the same items | Not started |
-| 5 | Write-up: coverage at a fixed error budget, with honest limitations | Not started |
+| 4 | LLM structured-output baseline on the same items | Closed, blocked -- no credentials |
+| 5 | Write-up: coverage at a fixed error budget, with honest limitations | Done -- `REPORT.md` |
 | 6 | Significance layer: an interval on every audited quantity, and an ECE noise floor | Done |
 | 7 | Pre-registration and power: the sample size and threshold fixed before the run | Done |
 | 8 | Vote aggregation priced per forward pass, with a paired interval on the gain | Done |
@@ -778,3 +778,82 @@ Unchanged, so milestones 2 and 4 remain blocked: arxiv.org refused by this
 environment's egress policy (`CONNECT tunnel failed, response 403`), so
 arXiv:2609.30454 is **still unread** and no novelty is claimed for anything
 above; `torch` and `transformers` both absent; no model credentials present.
+
+---
+
+## Findings from milestone 5 (2026-10-03) -- and the project close
+
+Milestone 5 is `REPORT.md`, written as a harness-only report. Every empirical
+H1/H2/H3 claim is dropped, because the gates never opened: re-tested today,
+arxiv.org refused (`CONNECT tunnel failed, response 403`), `torch` and
+`transformers` absent, no model credentials. Five milestones have now run with no
+model environment against a stop condition that named three.
+
+**The report quotes a script, not prose.** `examples/report_numbers.py`
+regenerates every figure in it. Writing it that way caught the two corrections
+below, which transcription would not have. Checked: two runs on this commit
+produce byte-identical output.
+
+### Correction 1: milestone 8's headline was over-general, and is withdrawn
+
+Milestone 8 recorded "a vote share is not a usable abstention gate" as a negative
+result, on one fixture, at 150 items and a 10 percent budget. Regenerating it
+across three fixtures that differ only in planted skill:
+
+| fixture | strategy | accuracy | bound | feasible | distinct |
+|---|---|---|---|---|---|
+| skill 0.0, pw 0.5, noise 0.3 | first_order | 0.2533 | 0.0067 | 0.0067 | 150 |
+| | modal_vote | 0.2533 | 0.0067 | **0.0000** | **1** |
+| skill 0.6, pw 0.3, noise 0.2 | first_order | 1.0000 | 1.0000 | 1.0000 | 150 |
+| | modal_vote | 1.0000 | 1.0000 | **1.0000** | **1** |
+| skill 0.25, pw 0.4, noise 0.5 | first_order | 0.4467 | 0.1467 | 0.1467 | 150 |
+| | mean_probability | 0.9733 | 1.0000 | 1.0000 | 150 |
+| | modal_vote | 0.5867 | 0.5333 | **0.4733** | 5 |
+
+On two of the three the vote *improves* both accuracy and coverage. The
+directional claim does not survive; milestone 8's own limitation note said the
+fixtures' defects are "of exactly the kind averaging cancels by construction",
+and that caveat turns out to govern the headline rather than sit beside it.
+
+What survives is structural and fixture-independent: a modal vote over K display
+orders takes at most K+1 distinct confidence values, and **at one distinct value
+the gate is all-or-nothing** -- the only available cutoff answers everything, so
+feasible coverage is 1.0 if the whole set is inside the budget and 0.0 otherwise,
+never anything between. Rows 1 and 2 above are the same single distinct value
+landing on opposite sides of that, which is the cleanest statement of it.
+
+The first fixture does keep milestone 8's sharpest point intact: the vote holds
+accuracy at *exactly* the single-pass 0.2533 and takes feasible coverage to
+0.0000 for eight passes per item. Accuracy is blind to it because accuracy never
+consults the confidence. That is the accuracy-versus-coverage argument in one
+row, and it is why H3 framed the question on coverage.
+
+The third fixture also reproduces milestone 9's bound-versus-feasible gap on a
+realistic profile rather than a constructed tie: 0.5333 claimed, 0.4733
+achievable.
+
+### Correction 2: milestone 3's temperature figures do not reproduce
+
+The milestone 3 entry above records planted `sharpness` of 1, 2, 4, 8 recovering
+temperatures 0.7822, 1.5643, 3.1286, 6.2571 at a constant ratio of 0.7822. On a
+200-item set today the ratio is **0.0353** (temperatures 0.0706, 0.1411, 0.2823
+for sharpness 2, 4, 8). The constant depends on the item set, so it was never a
+figure worth quoting -- the *proportionality* is the property, and it is what the
+suite asserts, so no test was wrong.
+
+Separately, the `sharpness = 1` row is not a fitted value at all: it returns
+exactly 0.0500, which is `fit_temperature`'s documented lower bound
+(`bounds=(0.05, 20.0)`). Expected behaviour, not a defect, but it means that row
+carried no information and should not have been listed beside the other three.
+`REPORT.md` states the proportionality without the constant.
+
+### Project status: closed
+
+Milestones 1, 3, 5, 6, 7, 8 and 9 complete. Milestones 2 and 4 closed
+**blocked and unstarted**, with the exact resume conditions in `REPORT.md` section
+6. No model was ever audited; no novelty is claimed anywhere, because
+arXiv:2609.30454 was never readable from this environment on any of five attempts
+(2026-09-29, 09-30, 10-01, 10-02, 10-03).
+
+The deliverable is the harness and the report. The honest one-line summary is
+that the harness is ready and the audit never ran.
